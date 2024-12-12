@@ -130,98 +130,142 @@ def create_album(conn):
     if not title:
         print("Album title cannot be empty. Operation canceled.")
         return
-    year = input("Enter the year the album was released: ")
-    artist_names = input("Enter the artist names separated by commas for the album: ").split(',')
-    song_titles = input("Enter song titles separated by commas for this album: ").split(',')
 
     with conn.cursor() as cur:
         # Check if the album already exists
         cur.execute("SELECT AlbumID FROM Albums WHERE Title = %s;", (title,))
         album = cur.fetchone()
-        if not album:
-            # Create the album if it does not exist
+        if album:
+            print("Album already exists. Operation canceled.")
+            return
+
+        try:
+            while True:
+                year = input("Enter the year the album was released: ").strip()
+                if not year.isdigit():
+                    print("Invalid year. Please enter a numeric year.")
+                else:
+                    year = int(year)
+                    break
+
+            artist_names = input("Enter the artist names separated by commas for the album: ").strip()
+            if not artist_names or not any(artist.strip() for artist in artist_names.split(',')):
+                print("Each album must have at least one artist. Operation canceled.")
+                conn.rollback()
+                return
+
+            song_titles = input("Enter song titles separated by commas for this album: ").strip()
+            if not song_titles or not any(song.strip() for song in song_titles.split(',')):
+                print("Each album must have at least one song. Operation canceled.")
+                conn.rollback()
+                return
+
+            # Create the album
             cur.execute("INSERT INTO Albums (Title, Year) VALUES (%s, %s) RETURNING AlbumID;", (title, year))
             album_id = cur.fetchone()[0]
-        else:
-            album_id = album[0]
 
-        # Process each artist linked to this album
-        for artist_name in artist_names:
-            artist_name = artist_name.strip()
-            cur.execute("SELECT ArtistID FROM Artists WHERE Name = %s;", (artist_name,))
-            artist = cur.fetchone()
-            if not artist:
-                # Create the artist if they do not exist
-                cur.execute("INSERT INTO Artists (Name) VALUES (%s) RETURNING ArtistID;", (artist_name,))
-                artist_id = cur.fetchone()[0]
-            else:
-                artist_id = artist[0]
+            # Link artists to the album
+            for artist_name in artist_names.split(','):
+                artist_name = artist_name.strip()
+                if not artist_name:
+                    print("Artist name cannot be empty. Operation canceled.")
+                    conn.rollback()
+                    return
 
-            # Link the album with the artist in the AlbumArtists table
-            cur.execute("INSERT INTO AlbumArtists (AlbumID, ArtistID) VALUES (%s, %s) ON CONFLICT DO NOTHING;", (album_id, artist_id))
-
-        # Process each song linked to this album
-        for song_title in song_titles:
-            song_title = song_title.strip()
-            category_names = input(f"Enter category names separated by commas for the song '{song_title}': ").split(',')
-
-            # Check if the song already exists and link or create it
-            cur.execute("SELECT SongID FROM Songs WHERE Title = %s;", (song_title,))
-            song = cur.fetchone()
-            if not song:
-                cur.execute("INSERT INTO Songs (Title) VALUES (%s) RETURNING SongID;", (song_title,))
-                song_id = cur.fetchone()[0]
-            else:
-                song_id = song[0]
-
-            # Link the song with the album
-            cur.execute("INSERT INTO SongAlbums (SongID, AlbumID) VALUES (%s, %s) ON CONFLICT DO NOTHING;", (song_id, album_id))
-
-            # Link the song with each artist mentioned for the album
-            for artist_name in artist_names:
                 cur.execute("SELECT ArtistID FROM Artists WHERE Name = %s;", (artist_name,))
-                artist_id = cur.fetchone()[0]
-                cur.execute("INSERT INTO SongArtists (SongID, ArtistID) VALUES (%s, %s) ON CONFLICT DO NOTHING;", (song_id, artist_id))
-
-            # Handle and link categories to the song
-            for category_name in category_names:
-                category_name = category_name.strip()
-                cur.execute("SELECT CategoryID FROM Categories WHERE Name = %s;", (category_name,))
-                category = cur.fetchone()
-                if not category:
-                    cur.execute("INSERT INTO Categories (Name) VALUES (%s) RETURNING CategoryID;", (category_name,))
-                    category_id = cur.fetchone()[0]
+                artist = cur.fetchone()
+                if not artist:
+                    cur.execute("INSERT INTO Artists (Name) VALUES (%s) RETURNING ArtistID;", (artist_name,))
+                    artist_id = cur.fetchone()[0]
                 else:
-                    category_id = category[0]
+                    artist_id = artist[0]
 
-                # Link the song with the category
-                cur.execute("INSERT INTO SongCategories (SongID, CategoryID) VALUES (%s, %s) ON CONFLICT DO NOTHING;", (song_id, category_id))
+                cur.execute("INSERT INTO AlbumArtists (AlbumID, ArtistID) VALUES (%s, %s);", (album_id, artist_id))
 
-        conn.commit()
+            # Link songs to the album
+            for song_title in song_titles.split(','):
+                song_title = song_title.strip()
+                if not song_title:
+                    print("Song title cannot be empty. Operation canceled.")
+                    conn.rollback()
+                    return
 
-    print(f"Album '{title}' linked with artists: {', '.join(artist_names)} and songs: {', '.join(song_titles)}.")
+                cur.execute("SELECT SongID FROM Songs WHERE Title = %s;", (song_title,))
+                song = cur.fetchone()
+                if not song:
+                    cur.execute("INSERT INTO Songs (Title) VALUES (%s) RETURNING SongID;", (song_title,))
+                    song_id = cur.fetchone()[0]
+                else:
+                    song_id = song[0]
+
+                cur.execute("INSERT INTO SongAlbums (SongID, AlbumID) VALUES (%s, %s) ON CONFLICT DO NOTHING;", (song_id, album_id))
+
+                # Prompt for categories for the song
+                category_names = input(f"Enter category names separated by commas for the song '{song_title}': ").strip()
+                if not category_names or not any(category.strip() for category in category_names.split(',')):
+                    print("Each song must have at least one category. Operation canceled.")
+                    conn.rollback()
+                    return
+
+                # Link the song with each artist mentioned for the album
+                for artist_name in artist_names:
+                    cur.execute("SELECT ArtistID FROM Artists WHERE Name = %s;", (artist_name,))
+                    artist_id = cur.fetchone()[0]
+                    cur.execute("INSERT INTO SongArtists (SongID, ArtistID) VALUES (%s, %s) ON CONFLICT DO NOTHING;", (song_id, artist_id))
+
+                # Handle and link categories to the song
+                for category_name in category_names:
+                    category_name = category_name.strip()
+                    if not category_name:
+                        print("Category name cannot be empty. Operation canceled.")
+                        conn.rollback()
+                        return
+
+                    cur.execute("SELECT CategoryID FROM Categories WHERE Name = %s;", (category_name,))
+                    category = cur.fetchone()
+                    if not category:
+                        cur.execute("INSERT INTO Categories (Name) VALUES (%s) RETURNING CategoryID;", (category_name,))
+                        category_id = cur.fetchone()[0]
+                    else:
+                        category_id = category[0]
+
+                    cur.execute("INSERT INTO SongCategories (SongID, CategoryID) VALUES (%s, %s) ON CONFLICT DO NOTHING;", (song_id, category_id))
+
+                conn.commit()
+        except Exception as e:
+            conn.rollback()
+            print(f"An error occurred: {e}. Operation canceled.")
 
 def create_category(conn):
-    name = input("Enter category name: ")
+    name = input("Enter category name: ").strip()
+    if not name:
+        print("Category name cannot be empty. Operation canceled.")
+        return
+
     with conn.cursor() as cur:
         cur.execute("SELECT CategoryID FROM Categories WHERE Name = %s;", (name,))
-        if cur.fetchone():
-            print("Category already exists.")
-            return False
-        cur.execute("INSERT INTO Categories (Name) VALUES (%s) RETURNING CategoryID;", (name,))
-        category_id = cur.fetchone()[0]
-        conn.commit()
-        print(f"Category '{name}' created successfully.")
-        return True
+        category = cur.fetchone()
+        if category:
+            print("Category already exists. Operation canceled.")
+            return
+
+        try:
+            # Create the category
+            cur.execute("INSERT INTO Categories (Name) VALUES (%s) RETURNING CategoryID;", (name,))
+            category_id = cur.fetchone()[0]
+            conn.commit()
+            print(f"Category '{name}' created successfully.")
+        except Exception as e:
+            conn.rollback()
+            print(f"An error occurred: {e}. Operation canceled.")
 
 def create_song(conn):
     title = input("Enter song title: ")
-    artist_names = input("Enter the artist names separated by commas for the song: ").split(',')
-    album_titles = input("Enter the album titles separated by commas this song belongs to: ").split(',')
-    category_names = input("Enter category names separated by commas for the song: ").split(',')
+    if not title:
+        print("Song title cannot be empty. Operation canceled.")
+        return
 
     with conn.cursor() as cur:
-        # Insert the song
         cur.execute("INSERT INTO Songs (Title) VALUES (%s) RETURNING SongID;", (title,))
         song_id = cur.fetchone()[0]
 
