@@ -4,7 +4,7 @@ def connect_db():
     return psycopg2.connect(
         dbname="AlbumCollection",
         user="postgres",
-        password="Fidiven03?",
+        password="CoolPassword123",
         host="localhost"
     )
 
