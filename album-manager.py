@@ -266,68 +266,104 @@ def create_song(conn):
         return
 
     with conn.cursor() as cur:
-        cur.execute("INSERT INTO Songs (Title) VALUES (%s) RETURNING SongID;", (title,))
-        song_id = cur.fetchone()[0]
+        cur.execute("SELECT SongID FROM Songs WHERE Title = %s;", (title,))
+        song = cur.fetchone()
+        if song:
+            print("Song already exists. Operation canceled.")
+            return
 
-        # Handle artists
-        for artist_name in artist_names:
-            artist_name = artist_name.strip()
-            cur.execute("SELECT ArtistID FROM Artists WHERE Name = %s;", (artist_name,))
-            artist = cur.fetchone()
-            if not artist:
-                cur.execute("INSERT INTO Artists (Name) VALUES (%s) RETURNING ArtistID;", (artist_name,))
-                artist_id = cur.fetchone()[0]
-            else:
-                artist_id = artist[0]
-            # Link song to artist
-            cur.execute("INSERT INTO SongArtists (SongID, ArtistID) VALUES (%s, %s);", (song_id, artist_id))
+        try:
+            artist_names = input("Enter the artist names separated by commas for the song: ").strip()
+            if not artist_names or not any(artist.strip() for artist in artist_names.split(',')):
+                print("Each song must have at least one artist. Operation canceled.")
+                conn.rollback()
+                return
 
-        # Handle albums
-        for album_title in album_titles:
-            album_title = album_title.strip()
-            cur.execute("SELECT AlbumID FROM Albums WHERE Title = %s;", (album_title,))
-            album = cur.fetchone()
-            if not album:
-                year = input(f"Enter the year the album '{album_title}' was released: ")
-                # Prompt for artists for this new album
-                album_artist_names = input(
-                    f"Enter artist names for the album '{album_title}', separated by commas: ").split(',')
-                cur.execute("INSERT INTO Albums (Title, Year) VALUES (%s, %s) RETURNING AlbumID;", (album_title, year))
-                album_id = cur.fetchone()[0]
-                # Assign artists to this album
-                for name in album_artist_names:
-                    name = name.strip()
-                    cur.execute("SELECT ArtistID FROM Artists WHERE Name = %s;", (name,))
-                    album_artist = cur.fetchone()
-                    if not album_artist:
-                        cur.execute("INSERT INTO Artists (Name) VALUES (%s) RETURNING ArtistID;", (name,))
-                        album_artist_id = cur.fetchone()[0]
-                        print(f"Artist '{name}' created for album '{album_title}'.")
-                    else:
-                        album_artist_id = album_artist[0]
-                    cur.execute("INSERT INTO AlbumArtists (AlbumID, ArtistID) VALUES (%s, %s);",
-                                (album_id, album_artist_id))
-            else:
-                album_id = album[0]
-            # Link song to album
-            cur.execute("INSERT INTO SongAlbums (SongID, AlbumID) VALUES (%s, %s);", (song_id, album_id))
+            album_titles = input("Enter the album titles separated by commas this song belongs to: ").strip()
+            if not album_titles or not any(album.strip() for album in album_titles.split(',')):
+                print("Each song must belong to at least one album. Operation canceled.")
+                conn.rollback()
+                return
 
-        # Handle categories
-        for name in category_names:
-            name = name.strip()
-            cur.execute("SELECT CategoryID FROM Categories WHERE Name = %s;", (name,))
-            category = cur.fetchone()
-            if not category:
-                cur.execute("INSERT INTO Categories (Name) VALUES (%s) RETURNING CategoryID;", (name,))
-                category_id = cur.fetchone()[0]
-                print(f"Category '{name}' created successfully.")
-            else:
-                category_id = category[0]
-            cur.execute("INSERT INTO SongCategories (SongID, CategoryID) VALUES (%s, %s);", (song_id, category_id))
+            category_names = input("Enter category names separated by commas for the song: ").strip()
+            if not category_names or not any(category.strip() for category in category_names.split(',')):
+                print("Each song must have at least one category. Operation canceled.")
+                conn.rollback()
+                return
 
-        conn.commit()
-        print(f"Song '{title}' created successfully.")
+            # Create the song
+            cur.execute("INSERT INTO Songs (Title) VALUES (%s) RETURNING SongID;", (title,))
+            song_id = cur.fetchone()[0]
 
+            # Link artists
+            for artist_name in artist_names.split(','):
+                artist_name = artist_name.strip()
+                if not artist_name:
+                    print("Artist name cannot be empty. Operation canceled.")
+                    conn.rollback()
+                    return
+
+                cur.execute("SELECT ArtistID FROM Artists WHERE Name = %s;", (artist_name,))
+                artist = cur.fetchone()
+                if not artist:
+                    cur.execute("INSERT INTO Artists (Name) VALUES (%s) RETURNING ArtistID;", (artist_name,))
+                    artist_id = cur.fetchone()[0]
+                else:
+                    artist_id = artist[0]
+
+                cur.execute("INSERT INTO SongArtists (SongID, ArtistID) VALUES (%s, %s);", (song_id, artist_id))
+
+            # Link albums
+            for album_title in album_titles.split(','):
+                album_title = album_title.strip()
+                if not album_title:
+                    print("Album title cannot be empty. Operation canceled.")
+                    conn.rollback()
+                    return
+
+                cur.execute("SELECT AlbumID FROM Albums WHERE Title = %s;", (album_title,))
+                album = cur.fetchone()
+                if not album:
+                    while True:
+                        year = input(f"Enter the year the album '{album_title}' was released: ").strip()
+                        if not year.isdigit():
+                            print("Invalid year. Please enter a numeric year.")
+                        else:
+                            year = int(year)
+                            break
+                    cur.execute("INSERT INTO Albums (Title, Year) VALUES (%s, %s) RETURNING AlbumID;",
+                                (album_title, year))
+                    album_id = cur.fetchone()[0]
+                else:
+                    album_id = album[0]
+
+                cur.execute("INSERT INTO SongAlbums (SongID, AlbumID) VALUES (%s, %s);", (song_id, album_id))
+
+            # Link categories
+            for category_name in category_names.split(','):
+                category_name = category_name.strip()
+                if not category_name:
+                    print("Category name cannot be empty. Operation canceled.")
+                    conn.rollback()
+                    return
+
+                cur.execute("SELECT CategoryID FROM Categories WHERE Name = %s;", (category_name,))
+                category = cur.fetchone()
+                if not category:
+                    cur.execute("INSERT INTO Categories (Name) VALUES (%s) RETURNING CategoryID;",
+                                (category_name,))
+                    category_id = cur.fetchone()[0]
+                else:
+                    category_id = category[0]
+
+                cur.execute("INSERT INTO SongCategories (SongID, CategoryID) VALUES (%s, %s);",
+                            (song_id, category_id))
+
+            # Commit the transaction
+            conn.commit()
+        except Exception as e:
+            conn.rollback()
+            print(f"An error occurred: {e}. Operation canceled.")
 def list_artists(conn):
     with conn.cursor() as cur:
         cur.execute("""
@@ -440,7 +476,7 @@ def delete_artist(conn):
             # Disable foreign key constraints
             cur.execute("SET session_replication_role = 'replica';")
 
-            # Step 1: Identify and delete albums exclusively linked to this artist
+            # Identify and delete albums exclusively linked to this artist
             cur.execute("""
                 SELECT al.AlbumID
                 FROM Albums al
@@ -456,7 +492,7 @@ def delete_artist(conn):
             for album in albums:
                 album_id = album[0]
 
-                # Step 2: Identify and delete songs exclusively linked to this album
+                # Identify and delete songs exclusively linked to this album
                 cur.execute("""
                     SELECT s.SongID
                     FROM Songs s
@@ -482,11 +518,11 @@ def delete_artist(conn):
                 cur.execute("DELETE FROM SongAlbums WHERE AlbumID = %s;", (album_id,))
                 cur.execute("DELETE FROM Albums WHERE AlbumID = %s;", (album_id,))
 
-            # Step 3: Delete references to the artist in junction tables
+            # Delete references to the artist in junction tables
             cur.execute("DELETE FROM AlbumArtists WHERE ArtistID = %s;", (artist_id,))
             cur.execute("DELETE FROM SongArtists WHERE ArtistID = %s;", (artist_id,))
 
-            # Step 4: Delete the artist
+            # Delete the artist
             cur.execute("DELETE FROM Artists WHERE ArtistID = %s;", (artist_id,))
 
             # Commit the transaction
@@ -525,8 +561,7 @@ def delete_album(conn):
     cur.execute("BEGIN;")
 
     try:
-        # First, remove the album from the AlbumArtists junction table
-        cur.execute("DELETE FROM AlbumArtists WHERE AlbumID = %s;", (album[0],))
+        album_id = album[0]
 
         # Next, identify songs that are only linked to this album
         cur.execute("""
@@ -539,15 +574,31 @@ def delete_album(conn):
 
         # For each song only linked to this deleted album, clear out entries from related tables
         for song_id in song_ids_for_deletion:
-            # Check if these songs are still linked to any albums
             cur.execute("SELECT COUNT(*) FROM SongAlbums WHERE SongID = %s;", (song_id,))
             if cur.fetchone()[0] == 0:
-                # Delete references from SongArtists
                 cur.execute("DELETE FROM SongArtists WHERE SongID = %s;", (song_id,))
-                # Delete references from SongCategories
                 cur.execute("DELETE FROM SongCategories WHERE SongID = %s;", (song_id,))
-                # Finally, delete the song itself if it's not linked to any other album
                 cur.execute("DELETE FROM Songs WHERE SongID = %s;", (song_id,))
+
+                # Check for artists exclusively linked to this album and its songs
+            cur.execute("""
+                   SELECT a.ArtistID
+                   FROM Artists a
+                   JOIN AlbumArtists aa ON a.ArtistID = aa.ArtistID
+                   WHERE aa.AlbumID = %s
+                   AND NOT EXISTS (
+                       SELECT 1 FROM AlbumArtists aa2
+                       WHERE aa2.ArtistID = a.ArtistID
+                       AND aa2.AlbumID != %s
+                   )
+               """, (album_id, album_id))
+            artist_ids_for_deletion = [artist[0] for artist in cur.fetchall()]
+
+            # Delete these artists from junction tables and the main table
+            for artist_id in artist_ids_for_deletion:
+                cur.execute("DELETE FROM SongArtists WHERE ArtistID = %s;", (artist_id,))
+                cur.execute("DELETE FROM AlbumArtists WHERE ArtistID = %s;", (artist_id,))
+                cur.execute("DELETE FROM Artists WHERE ArtistID = %s;", (artist_id,))
 
         # Finally, delete the album
         cur.execute("DELETE FROM Albums WHERE AlbumID = %s;", (album[0],))
@@ -593,7 +644,7 @@ def delete_category(conn):
         cur.execute("""
             SELECT s.SongID
             FROM Songs s
-            INNER JOIN SongCategories sc ON s.SongID = sc.SongID
+            JOIN SongCategories sc ON s.SongID = sc.SongID
             WHERE sc.CategoryID = %s
             AND NOT EXISTS (
                 SELECT 1 FROM SongCategories sc2
@@ -604,24 +655,56 @@ def delete_category(conn):
 
         if songs:
             song_ids = [song[0] for song in songs]
-            print("Deleting category '" + category_name + "' will also delete these songs:")
+
+            # Delete all references to these songs
             for song_id in song_ids:
-                cur.execute("SELECT Title FROM Songs WHERE SongID = %s;", (song_id,))
-                song_title = cur.fetchone()[0]
-                print(f"- {song_title}")
+                # Remove references to the song from other junction tables
+                cur.execute("DELETE FROM SongAlbums WHERE SongID = %s;", (song_id,))
+                cur.execute("DELETE FROM SongArtists WHERE SongID = %s;", (song_id,))
+                cur.execute("DELETE FROM SongCategories WHERE SongID = %s;", (song_id,))
+                # Delete the song itself
+                cur.execute("DELETE FROM Songs WHERE SongID = %s;", (song_id,))
 
-            confirm = input("Do you still want to proceed with deleting this category and the listed songs? (yes/no): ")
-            if confirm.lower() != 'yes':
-                print("Deletion canceled.")
-                return
+        # Identify albums linked exclusively to these songs
+        cur.execute("""
+                SELECT al.AlbumID, al.Title
+                FROM Albums al
+                LEFT JOIN SongAlbums sa ON al.AlbumID = sa.AlbumID
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM SongAlbums sa2
+                    WHERE sa2.AlbumID = al.AlbumID AND sa2.SongID NOT IN %s
+                );
+            """, (tuple(song_ids),))
+        albums_for_deletion = cur.fetchall()
 
-            # Delete references from songalbums, songartists, and songcategories
-            cur.execute("DELETE FROM SongAlbums WHERE SongID = ANY(%s);", (song_ids,))
-            cur.execute("DELETE FROM SongArtists WHERE SongID = ANY(%s);", (song_ids,))
-            cur.execute("DELETE FROM SongCategories WHERE SongID = ANY(%s);", (song_ids,))
+        for album in albums_for_deletion:
+            album_id = album[0]
+            # Delete album references
+            cur.execute("DELETE FROM AlbumArtists WHERE AlbumID = %s;", (album_id,))
+            cur.execute("DELETE FROM SongAlbums WHERE AlbumID = %s;", (album_id,))
+            cur.execute("DELETE FROM Albums WHERE AlbumID = %s;", (album_id,))
 
-            # Delete the songs themselves
-            cur.execute("DELETE FROM Songs WHERE SongID = ANY(%s);", (song_ids,))
+        # Identify artists linked exclusively to these albums and songs
+        cur.execute("""
+                SELECT a.ArtistID, a.Name
+                FROM Artists a
+                LEFT JOIN SongArtists sa ON a.ArtistID = sa.ArtistID
+                LEFT JOIN AlbumArtists aa ON a.ArtistID = aa.ArtistID
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM SongArtists sa2
+                    WHERE sa2.ArtistID = a.ArtistID AND sa2.SongID NOT IN %s
+                )
+                AND NOT EXISTS (
+                    SELECT 1 FROM AlbumArtists aa2
+                    WHERE aa2.ArtistID = a.ArtistID AND aa2.AlbumID NOT IN %s
+                );
+            """, (tuple(song_ids), tuple([album[0] for album in albums_for_deletion])))
+        artists_for_deletion = cur.fetchall()
+
+        for artist in artists_for_deletion:
+            artist_id = artist[0]
+            # Delete the artist
+            cur.execute("DELETE FROM Artists WHERE ArtistID = %s;", (artist_id,))
 
         # Finally, delete the category
         cur.execute("DELETE FROM Categories WHERE CategoryID = %s;", (category[0],))
