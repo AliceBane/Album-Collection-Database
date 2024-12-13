@@ -31,6 +31,8 @@ def create_artist(conn):
         artist_id = cur.fetchone()[0]
 
         # Prompt for songs
+        print("Existing songs:")
+        list_songs(conn)
         song_titles = input("Enter song titles separated by commas for the new artist: ").strip()
         if not song_titles or not any(song.strip() for song in song_titles.split(',')):
             print("An artist must have at least one song. Operation canceled.")
@@ -45,6 +47,8 @@ def create_artist(conn):
                 return
 
             # Prompt for albums
+            print("Existing albums:")
+            list_albums(conn)
             album_titles = input(f"Enter album titles separated by commas for the song '{song_title}': ").strip()
             if not album_titles or not any(album.strip() for album in album_titles.split(',')):
                 print("Each song must belong to at least one album. Operation canceled.")
@@ -52,6 +56,8 @@ def create_artist(conn):
                 return
 
             # Prompt for categories
+            print("Existing categories:")
+            list_categories(conn)
             categories = input(f"Enter category names separated by commas for the song '{song_title}': ").strip()
             if not categories or not any(category.strip() for category in categories.split(',')):
                 print("Each song must have at least one category. Operation canceled.")
@@ -126,70 +132,82 @@ def create_artist(conn):
         conn.commit()
 
 def create_album(conn):
-    title = input("Enter album title: ")
-    if not title:
-        print("Album title cannot be empty. Operation canceled.")
-        return
+    # Input album title and validate
+    while True:
+        title = input("Enter album title: ").strip()
+        if title:
+            break
+        print("Album title cannot be empty. Please try again.")
+
+    # Input and validate the year
+    while True:
+        try:
+            year = int(input("Enter the year the album was released: ").strip())
+            break
+        except ValueError:
+            print("Invalid input. Please enter a valid year (integer).")
+
+    # Input artist names and validate
+    while True:
+        print("Existing artists:")
+        list_artists(conn)
+        artist_names = input("Enter the artist names separated by commas for the album: ").strip()
+        if artist_names:
+            artist_names = [name.strip() for name in artist_names.split(',') if name.strip()]
+            if artist_names:
+                break
+        print("You must enter at least one artist name. Please try again.")
+
+    # Input song titles and validate
+    while True:
+        print("Existing songs:")
+        list_songs(conn)
+        song_titles = input("Enter song titles separated by commas for this album: ").strip()
+        if song_titles:
+            song_titles = [title.strip() for title in song_titles.split(',') if title.strip()]
+            # Check for duplicate song titles
+            if len(set(song_titles)) != len(song_titles):
+                print("Duplicate song titles found. Please provide unique song titles.")
+                continue
+            if song_titles:
+                break
+        print("You must enter at least one song title. Please try again.")
 
     with conn.cursor() as cur:
-        # Check if the album already exists
-        cur.execute("SELECT AlbumID FROM Albums WHERE Title = %s;", (title,))
-        album = cur.fetchone()
-        if album:
-            print("Album already exists. Operation canceled.")
-            return
-
         try:
-            while True:
-                year = input("Enter the year the album was released: ").strip()
-                if not year.isdigit():
-                    print("Invalid year. Please enter a numeric year.")
-                else:
-                    year = int(year)
-                    break
-
-            artist_names = input("Enter the artist names separated by commas for the album: ").strip()
-            if not artist_names or not any(artist.strip() for artist in artist_names.split(',')):
-                print("Each album must have at least one artist. Operation canceled.")
-                conn.rollback()
+            # Check if the album already exists
+            cur.execute("SELECT AlbumID FROM Albums WHERE Title = %s AND Year = %s;", (title, year))
+            album = cur.fetchone()
+            if album:
+                print(f"Album '{title}' from year {year} already exists. No duplicates are allowed.")
                 return
 
-            song_titles = input("Enter song titles separated by commas for this album: ").strip()
-            if not song_titles or not any(song.strip() for song in song_titles.split(',')):
-                print("Each album must have at least one song. Operation canceled.")
-                conn.rollback()
-                return
-
-            # Create the album
+            # Create the album if it does not exist
             cur.execute("INSERT INTO Albums (Title, Year) VALUES (%s, %s) RETURNING AlbumID;", (title, year))
             album_id = cur.fetchone()[0]
 
-            # Link artists to the album
-            for artist_name in artist_names.split(','):
-                artist_name = artist_name.strip()
-                if not artist_name:
-                    print("Artist name cannot be empty. Operation canceled.")
-                    conn.rollback()
-                    return
-
+            # Process each artist linked to this album
+            for artist_name in artist_names:
                 cur.execute("SELECT ArtistID FROM Artists WHERE Name = %s;", (artist_name,))
                 artist = cur.fetchone()
                 if not artist:
+                    # Create the artist if they do not exist
                     cur.execute("INSERT INTO Artists (Name) VALUES (%s) RETURNING ArtistID;", (artist_name,))
                     artist_id = cur.fetchone()[0]
                 else:
                     artist_id = artist[0]
 
-                cur.execute("INSERT INTO AlbumArtists (AlbumID, ArtistID) VALUES (%s, %s);", (album_id, artist_id))
+                # Link the album with the artist
+                cur.execute("INSERT INTO AlbumArtists (AlbumID, ArtistID) VALUES (%s, %s) ON CONFLICT DO NOTHING;", (album_id, artist_id))
 
-            # Link songs to the album
-            for song_title in song_titles.split(','):
-                song_title = song_title.strip()
-                if not song_title:
-                    print("Song title cannot be empty. Operation canceled.")
-                    conn.rollback()
-                    return
+            # Process each song linked to this album
+            for song_title in song_titles:
+                print("Existing categories:")
+                list_categories(conn)
+                category_names = input(f"Enter category names separated by commas for the song '{song_title}': ").strip()
+                category_names = [name.strip() for name in category_names.split(',') if name.strip()]
 
+                # Check if the song already exists and link or create it
                 cur.execute("SELECT SongID FROM Songs WHERE Title = %s;", (song_title,))
                 song = cur.fetchone()
                 if not song:
@@ -198,14 +216,8 @@ def create_album(conn):
                 else:
                     song_id = song[0]
 
+                # Link the song with the album
                 cur.execute("INSERT INTO SongAlbums (SongID, AlbumID) VALUES (%s, %s) ON CONFLICT DO NOTHING;", (song_id, album_id))
-
-                # Prompt for categories for the song
-                category_names = input(f"Enter category names separated by commas for the song '{song_title}': ").strip()
-                if not category_names or not any(category.strip() for category in category_names.split(',')):
-                    print("Each song must have at least one category. Operation canceled.")
-                    conn.rollback()
-                    return
 
                 # Link the song with each artist mentioned for the album
                 for artist_name in artist_names:
@@ -215,12 +227,6 @@ def create_album(conn):
 
                 # Handle and link categories to the song
                 for category_name in category_names:
-                    category_name = category_name.strip()
-                    if not category_name:
-                        print("Category name cannot be empty. Operation canceled.")
-                        conn.rollback()
-                        return
-
                     cur.execute("SELECT CategoryID FROM Categories WHERE Name = %s;", (category_name,))
                     category = cur.fetchone()
                     if not category:
@@ -229,13 +235,15 @@ def create_album(conn):
                     else:
                         category_id = category[0]
 
+                    # Link the song with the category
                     cur.execute("INSERT INTO SongCategories (SongID, CategoryID) VALUES (%s, %s) ON CONFLICT DO NOTHING;", (song_id, category_id))
 
-                conn.commit()
+            conn.commit()
+            print(f"Album '{title}' linked with artists: {', '.join(artist_names)} and songs: {', '.join(song_titles)}.")
+
         except Exception as e:
             conn.rollback()
-            print(f"An error occurred: {e}. Operation canceled.")
-
+            print(f"An error occurred while creating the album: {e}")
 def create_category(conn):
     name = input("Enter category name: ").strip()
     if not name:
@@ -273,18 +281,24 @@ def create_song(conn):
             return
 
         try:
+            print("Existing artists:")
+            list_artists(conn)
             artist_names = input("Enter the artist names separated by commas for the song: ").strip()
             if not artist_names or not any(artist.strip() for artist in artist_names.split(',')):
                 print("Each song must have at least one artist. Operation canceled.")
                 conn.rollback()
                 return
 
+            print("Existing albums:")
+            list_albums(conn)
             album_titles = input("Enter the album titles separated by commas this song belongs to: ").strip()
             if not album_titles or not any(album.strip() for album in album_titles.split(',')):
                 print("Each song must belong to at least one album. Operation canceled.")
                 conn.rollback()
                 return
 
+            print("Existing categories:")
+            list_categories(conn)
             category_names = input("Enter category names separated by commas for the song: ").strip()
             if not category_names or not any(category.strip() for category in category_names.split(',')):
                 print("Each song must have at least one category. Operation canceled.")
@@ -558,13 +572,12 @@ def delete_album(conn):
         print("Deletion canceled.")
         return
 
-    # Start transaction block explicitly
     cur.execute("BEGIN;")
 
     try:
         album_id = album[0]
 
-        # Next, identify songs that are only linked to this album
+        # Identify songs that are only linked to this album
         cur.execute("""
             SELECT SongID FROM SongAlbums WHERE AlbumID = %s
         """, (album[0],))
@@ -601,7 +614,7 @@ def delete_album(conn):
                 cur.execute("DELETE FROM AlbumArtists WHERE ArtistID = %s;", (artist_id,))
                 cur.execute("DELETE FROM Artists WHERE ArtistID = %s;", (artist_id,))
 
-        # Finally, delete the album
+        # Delete the album
         cur.execute("DELETE FROM Albums WHERE AlbumID = %s;", (album[0],))
 
         # Commit the transaction
@@ -609,20 +622,22 @@ def delete_album(conn):
         print("Album and any exclusive songs and artists successfully deleted.")
     except Exception as e:
         print(f"An error occurred: {e}")
-        cur.execute("ROLLBACK;")  # Rollback the transaction on error
+        cur.execute("ROLLBACK;")
     finally:
-        # Re-enable foreign key checks
         cur.execute("SET session_replication_role = 'origin';")
 
 def delete_category(conn):
     cur = conn.cursor()
     try:
-        # Disable foreign key checks
         cur.execute("SET session_replication_role = replica;")
 
         # Display existing categories
         cur.execute("SELECT CategoryID, Name FROM Categories;")
         categories = cur.fetchall()
+        if not categories:
+            print("No categories found.")
+            return
+
         print("Existing categories:")
         for cat in categories:
             print(f"- {cat[1]}")
@@ -641,6 +656,8 @@ def delete_category(conn):
             print("Deletion canceled.")
             return
 
+        category_id = category[0]
+
         # Check songs that only belong to this category
         cur.execute("""
             SELECT s.SongID
@@ -651,11 +668,15 @@ def delete_category(conn):
                 SELECT 1 FROM SongCategories sc2
                 WHERE sc2.SongID = s.SongID AND sc2.CategoryID != %s
             );
-        """, (category[0], category[0]))
+        """, (category_id, category_id))
         songs = cur.fetchall()
+        song_ids = [song[0] for song in songs]
 
-        if songs:
-            song_ids = [song[0] for song in songs]
+        if song_ids:
+            for song_id in song_ids:
+                cur.execute("SELECT Title FROM Songs WHERE SongID = %s;", (song_id,))
+                song_title = cur.fetchone()[0]
+                print(f"- {song_title}")
 
             # Delete all references to these songs
             for song_id in song_ids:
@@ -667,16 +688,19 @@ def delete_category(conn):
                 cur.execute("DELETE FROM Songs WHERE SongID = %s;", (song_id,))
 
         # Identify albums linked exclusively to these songs
-        cur.execute("""
-                SELECT al.AlbumID, al.Title
-                FROM Albums al
-                LEFT JOIN SongAlbums sa ON al.AlbumID = sa.AlbumID
-                WHERE NOT EXISTS (
-                    SELECT 1 FROM SongAlbums sa2
-                    WHERE sa2.AlbumID = al.AlbumID AND sa2.SongID NOT IN %s
-                );
-            """, (tuple(song_ids),))
-        albums_for_deletion = cur.fetchall()
+        if song_ids:
+            cur.execute("""
+                    SELECT al.AlbumID, al.Title
+                    FROM Albums al
+                    LEFT JOIN SongAlbums sa ON al.AlbumID = sa.AlbumID
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM SongAlbums sa2
+                        WHERE sa2.AlbumID = al.AlbumID AND sa2.SongID NOT IN %s
+                    );
+                """, (tuple(song_ids),))
+            albums_for_deletion = cur.fetchall()
+        else:
+            albums_for_deletion = []
 
         for album in albums_for_deletion:
             album_id = album[0]
@@ -686,21 +710,24 @@ def delete_category(conn):
             cur.execute("DELETE FROM Albums WHERE AlbumID = %s;", (album_id,))
 
         # Identify artists linked exclusively to these albums and songs
-        cur.execute("""
-                SELECT a.ArtistID, a.Name
-                FROM Artists a
-                LEFT JOIN SongArtists sa ON a.ArtistID = sa.ArtistID
-                LEFT JOIN AlbumArtists aa ON a.ArtistID = aa.ArtistID
-                WHERE NOT EXISTS (
-                    SELECT 1 FROM SongArtists sa2
-                    WHERE sa2.ArtistID = a.ArtistID AND sa2.SongID NOT IN %s
-                )
-                AND NOT EXISTS (
-                    SELECT 1 FROM AlbumArtists aa2
-                    WHERE aa2.ArtistID = a.ArtistID AND aa2.AlbumID NOT IN %s
-                );
-            """, (tuple(song_ids), tuple([album[0] for album in albums_for_deletion])))
-        artists_for_deletion = cur.fetchall()
+        if song_ids or albums_for_deletion:
+            cur.execute("""
+                    SELECT a.ArtistID, a.Name
+                    FROM Artists a
+                    LEFT JOIN SongArtists sa ON a.ArtistID = sa.ArtistID
+                    LEFT JOIN AlbumArtists aa ON a.ArtistID = aa.ArtistID
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM SongArtists sa2
+                        WHERE sa2.ArtistID = a.ArtistID AND sa2.SongID NOT IN %s
+                    )
+                    AND NOT EXISTS (
+                        SELECT 1 FROM AlbumArtists aa2
+                        WHERE aa2.ArtistID = a.ArtistID AND aa2.AlbumID NOT IN %s
+                    );
+                """, (tuple(song_ids), tuple([album[0] for album in albums_for_deletion])))
+            artists_for_deletion = cur.fetchall()
+        else:
+            artists_for_deletion = []
 
         for artist in artists_for_deletion:
             artist_id = artist[0]
@@ -715,7 +742,6 @@ def delete_category(conn):
         print(f"An error occurred: {e}")
         conn.rollback()  # Rollback in case of error
     finally:
-        # Re-enable foreign key checks
         cur.execute("SET session_replication_role = DEFAULT;")
 
 def delete_song(conn):
@@ -769,10 +795,7 @@ def delete_song(conn):
         song_id = song[0]
 
         try:
-            # Start a transaction block
             cur.execute("BEGIN;")
-
-            # Disable foreign key constraints
             cur.execute("SET session_replication_role = 'replica';")
 
             # Delete references from junction tables for this song
@@ -783,8 +806,7 @@ def delete_song(conn):
             # Delete the song itself
             cur.execute("DELETE FROM Songs WHERE SongID = %s;", (song_id,))
 
-            # Now check for albums with no songs
-            # Albums that have zero songs left should be removed
+            # Albums that have zero songs left
             cur.execute("""
                 SELECT al.AlbumID
                 FROM Albums al
@@ -800,8 +822,7 @@ def delete_song(conn):
                 # Remove the album itself
                 cur.execute("DELETE FROM Albums WHERE AlbumID = %s;", (orphan_album_id,))
 
-            # Now check for artists with no songs
-            # If an artist has zero songs remaining, remove them
+            # Artists that have no songs remaining
             cur.execute("""
                 SELECT a.ArtistID
                 FROM Artists a
@@ -817,7 +838,6 @@ def delete_song(conn):
                 # Remove the artist
                 cur.execute("DELETE FROM Artists WHERE ArtistID = %s;", (orphan_artist_id,))
 
-            # Commit the transaction
             cur.execute("COMMIT;")
             print(f"Song '{song_title}' and any orphaned albums/artists deleted successfully.")
 
@@ -825,10 +845,11 @@ def delete_song(conn):
             cur.execute("ROLLBACK;")
             print(f"An error occurred: {e}")
         finally:
-            # Re-enable foreign key constraints
             cur.execute("SET session_replication_role = 'origin';")
 
 def list_songs_by_artist(conn):
+    print("Existing artists:")
+    list_artists(conn)
     artist_name = input("Enter artist name to list songs: ")
     with conn.cursor() as cur:
         cur.execute("""
@@ -865,6 +886,8 @@ def list_artists_with_albums_by_year(conn):
             print(f"No artists found with albums released in {year}.")
 
 def list_albums_by_category(conn):
+    print("Existing categories:")
+    list_categories(conn)
     category_name = input("Enter the category name to list albums: ")
     with conn.cursor() as cur:
         cur.execute("""
