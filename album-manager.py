@@ -331,9 +331,9 @@ def create_song(conn):
                         else:
                             year = int(year)
                             break
-                    cur.execute("INSERT INTO Albums (Title, Year) VALUES (%s, %s) RETURNING AlbumID;",
-                                (album_title, year))
+                    cur.execute("INSERT INTO Albums (Title, Year) VALUES (%s, %s) RETURNING AlbumID;", (album_title, year))
                     album_id = cur.fetchone()[0]
+                    cur.execute("INSERT INTO AlbumArtists (AlbumID, ArtistID) VALUES (%s, %s);", (album_id, artist_id))
                 else:
                     album_id = album[0]
 
@@ -364,6 +364,7 @@ def create_song(conn):
         except Exception as e:
             conn.rollback()
             print(f"An error occurred: {e}. Operation canceled.")
+
 def list_artists(conn):
     with conn.cursor() as cur:
         cur.execute("""
