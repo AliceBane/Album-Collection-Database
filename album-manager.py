@@ -454,7 +454,7 @@ def list_songs(conn):
 
 def delete_artist(conn):
     with conn.cursor() as cur:
-        # List existing artists for user selection
+        # List existing artists
         list_artists(conn)
         artist_name = input("Enter the name of the artist to delete: ")
 
@@ -946,6 +946,10 @@ def edit_artist(conn):
             return
 
         new_name = input("Enter the new artist name: ")
+        if cur.fetchone():
+            print(f"An artist with the name '{new_name}' already exists. Operation canceled.")
+            return
+
         cur.execute("UPDATE Artists SET Name = %s WHERE ArtistID = %s;", (new_name, artist[0]))
         conn.commit()
         print("Artist name updated successfully.")
@@ -981,6 +985,10 @@ def edit_album(conn):
 
         if choice == '1':
             new_title = input(f"Current title: '{current_title}'. Enter the new album title: ")
+            cur.execute("SELECT 1 FROM Albums WHERE Title = %s;", (new_title,))
+            if cur.fetchone():
+                print(f"An album with the title '{new_title}' already exists. Operation canceled.")
+                return
             cur.execute("UPDATE Albums SET Title = %s WHERE AlbumID = %s;", (new_title, album_id))
             print("Album title updated successfully.")
         elif choice == '2':
@@ -1015,6 +1023,10 @@ def edit_category(conn):
             return
 
         new_name = input("Enter the new category name: ")
+        cur.execute("SELECT 1 FROM Categories WHERE Name = %s;", (new_name,))
+        if cur.fetchone():
+            print(f"A category with the name '{new_name}' already exists. Operation canceled.")
+            return
         cur.execute("UPDATE Categories SET Name = %s WHERE CategoryID = %s;", (new_name, category[0]))
         conn.commit()
         print("Category name updated successfully.")
@@ -1023,11 +1035,8 @@ def edit_song(conn):
     with conn.cursor() as cur:
         # Show all available songs
         cur.execute("""
-            SELECT s.Title, array_agg(DISTINCT c.Name) AS Categories
+            SELECT s.Title
             FROM Songs s
-            LEFT JOIN SongCategories sc ON s.SongID = sc.SongID
-            LEFT JOIN Categories c ON sc.CategoryID = c.CategoryID
-            GROUP BY s.SongID
             ORDER BY s.Title;
         """)
         all_songs = cur.fetchall()
@@ -1038,12 +1047,7 @@ def edit_song(conn):
         print("Available Songs:")
         for song_row in all_songs:
             title = song_row[0]
-            categories = song_row[1]
-            if categories and categories[0] is not None:
-                category_list = ', '.join(categories)
-            else:
-                category_list = "No categories"
-            print(f"- {title} (Categories: {category_list})")
+            print(f"- {title}")
 
     song_title = input("Enter the song title to edit: ")
     with conn.cursor() as cur:
@@ -1053,53 +1057,15 @@ def edit_song(conn):
             print("Song not found.")
             return
 
-        print("Select what you would like to edit:")
-        print("1. Song name")
-        print("2. Song categories")
-        choice = input("Enter choice (1 or 2): ")
-
-        if choice == '1':
-            new_title = input("Enter the new song title: ")
-            cur.execute("UPDATE Songs SET Title = %s WHERE SongID = %s;", (new_title, song[0]))
-            print("Song name updated successfully.")
-
-        elif choice == '2':
-            print("Current categories for this song:")
-            cur.execute("""
-                SELECT Name 
-                FROM Categories 
-                JOIN SongCategories ON Categories.CategoryID = SongCategories.CategoryID 
-                WHERE SongCategories.SongID = %s;
-            """, (song[0],))
-            categories = cur.fetchall()
-            if categories:
-                for category in categories:
-                    print(category[0])
-            else:
-                print("No categories")
-
-            category_names = input("Enter new comma-separated category names for this song: ").split(',')
-            cur.execute("DELETE FROM SongCategories WHERE SongID = %s;", (song[0],))
-
-            for category_name in category_names:
-                category_name = category_name.strip()
-                if category_name:
-                    cur.execute("SELECT CategoryID FROM Categories WHERE Name = %s;", (category_name,))
-                    category = cur.fetchone()
-                    if not category:
-                        cur.execute("INSERT INTO Categories (Name) VALUES (%s) RETURNING CategoryID;",
-                                    (category_name,))
-                        category_id = cur.fetchone()[0]
-                    else:
-                        category_id = category[0]
-                    cur.execute("INSERT INTO SongCategories (SongID, CategoryID) VALUES (%s, %s);", (song[0], category_id))
-            print("Song categories updated successfully.")
-
-        else:
-            print("Invalid choice. No changes made.")
+        new_title = input("Enter the new song title: ")
+        cur.execute("SELECT 1 FROM Songs WHERE Title = %s;", (new_title,))
+        if cur.fetchone():
+            print(f"A song with the title '{new_title}' already exists. Operation canceled.")
             return
 
+        cur.execute("UPDATE Songs SET Title = %s WHERE SongID = %s;", (new_title, song[0]))
         conn.commit()
+        print("Song name updated successfully.")
 
 def main_menu():
     conn = connect_db()
